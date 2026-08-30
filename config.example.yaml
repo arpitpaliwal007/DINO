@@ -1,0 +1,7 @@
+query: person wearing a red helmet
+box_threshold: 0.30
+text_threshold: 0.25
+frame_stride: 2
+segment: false
+grounding_model: IDEA-Research/grounding-dino-tiny
+closed_set_model: yolo11n.pt
