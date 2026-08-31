@@ -23,8 +23,17 @@ class GroundingDINODetector(Detector):
         image = Image.fromarray(frame[:, :, ::-1])
         inputs = self.processor(images=image, text=text, return_tensors="pt").to(self.device)
         with torch.no_grad(): outputs = self.model(**inputs)
-        result = self.processor.post_process_grounded_object_detection(outputs, inputs.input_ids, box_threshold=self.box_threshold, text_threshold=self.text_threshold, target_sizes=torch.tensor([image.size[::-1]], device=self.device))[0]
-        return [Detection(tuple(map(float, box.tolist())), float(score), str(label)) for box, score, label in zip(result["boxes"], result["scores"], result["labels"])]
+        # Transformers <=4.51 used `box_threshold`; current releases use `threshold`.
+        result = self.processor.post_process_grounded_object_detection(
+            outputs, inputs.input_ids, threshold=self.box_threshold,
+            text_threshold=self.text_threshold,
+            target_sizes=torch.tensor([image.size[::-1]], device=self.device),
+        )[0]
+        # Current Transformers versions expose human-readable phrases in text_labels;
+        # labels may be integer IDs.
+        labels = result.get("text_labels", result["labels"])
+        return [Detection(tuple(map(float, box.tolist())), float(score), str(label))
+                for box, score, label in zip(result["boxes"], result["scores"], labels)]
 
 class YOLOClosedSetDetector(Detector):
     """COCO-only baseline. It deliberately cannot interpret arbitrary attributes."""
