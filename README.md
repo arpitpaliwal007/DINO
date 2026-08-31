@@ -36,6 +36,9 @@ ovva --source input.mp4 --query 'person wearing a red helmet' --baseline --outpu
 pip install -e '.[sam]'
 ovva --source input.mp4 --query 'red hard hat' --segment \
   --sam-checkpoint checkpoints/sam2.1_hiera_large.pt --sam-config configs/sam2.1/sam2.1_hiera_l.yaml
+
+# Optional normalized region: x1,y1,x2,y2. Adds zone entries and per-track zone dwell time.
+ovva --source input.mp4 --query 'person' --zone 0.10,0.10,0.90,0.90 --output artifacts/zone-run
 ```
 
 ## Results and evaluation protocol
@@ -49,7 +52,24 @@ Run the same source and query with DINO and the baseline, then compare the gener
 | mask IoU | Does SAM2 accurately delineate the detected instance? |
 | dwell-time MAE | Are temporal business metrics reliable? |
 
-The included deterministic smoke-test result (synthetic 4-second clip) is: **1 unique track, 4.0 seconds dwell time, 0.91 mean confidence, and 1 peak concurrent object**. This validates output plumbing, not model accuracy; use a labelled real video for the evaluation table above.
+### Verified Colab result
+
+The open-vocabulary pipeline was run on a public person/bicycle/car video using a Colab T4 GPU, query `person`, and `--stride 2`.
+
+| Metric | Result |
+|---|---:|
+| Processed frames | 324 |
+| Effective sampling rate | 12 FPS |
+| Unique person tracks | 8 |
+| Peak concurrent tracks | 2 |
+| Mean detection confidence | 0.727 |
+| Longest observed track dwell | 6.0 s |
+
+These are operational results from one unlabelled public clip, not a precision/recall benchmark. Use a labelled real video to report the evaluation metrics above.
+
+## Colab
+
+Open [notebooks/open_vocabulary_video_analytics_colab.ipynb](notebooks/open_vocabulary_video_analytics_colab.ipynb) in Google Colab to install the project, download a public sample video, run Grounding DINO + ByteTrack and the YOLO baseline, and display the results. The notebook uses the production-compatible Grounding DINO `threshold` API.
 
 ## Architecture
 
@@ -68,4 +88,5 @@ per-track dwell time, count, confidence → JSON + annotated MP4
 - Models are lazily loaded, keeping CLI startup and test discovery fast.
 - `frame_stride` trades temporal fidelity for throughput; analytics uses the effective sampling FPS.
 - The baseline is intentionally not phrase-filtered: YOLO's labels are closed-set, which is the comparison being illustrated.
+- An optional normalized zone adds entry count and dwell-time analytics for a region of interest.
 - In production, pin model revisions, record hardware/latency, and evaluate phrase-level labels before using outputs in a safety-sensitive setting.
