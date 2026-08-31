@@ -9,8 +9,9 @@ from .detectors import Detector
 from .segmenters import SAM2Segmenter
 
 class VideoAnalyticsPipeline:
-    def __init__(self, detector: Detector, segmenter: SAM2Segmenter | None = None, frame_stride: int = 1) -> None:
-        self.detector, self.segmenter, self.frame_stride = detector, segmenter, frame_stride
+    def __init__(self, detector: Detector, segmenter: SAM2Segmenter | None = None, frame_stride: int = 1,
+                 zone: tuple[float, float, float, float] | None = None) -> None:
+        self.detector, self.segmenter, self.frame_stride, self.zone = detector, segmenter, frame_stride, zone
         self.tracker = sv.ByteTrack(track_activation_threshold=.25)
     def run(self, source: str | Path, query: str, output_dir: str | Path) -> dict:
         output_dir = Path(output_dir); output_dir.mkdir(parents=True, exist_ok=True)
@@ -19,6 +20,7 @@ class VideoAnalyticsPipeline:
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0; width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         writer = cv2.VideoWriter(str(output_dir / "annotated.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
         analytics = TemporalAnalytics(fps=fps / self.frame_stride); boxes, labels = sv.BoxAnnotator(), sv.LabelAnnotator(); frame_idx = 0
+        zone_px = tuple((self.zone[i] * (width if i % 2 == 0 else height)) for i in range(4)) if self.zone else None
         while True:
             ok, frame = cap.read()
             if not ok: break
@@ -28,9 +30,14 @@ class VideoAnalyticsPipeline:
             xyxy = np.asarray([d.xyxy for d in found], dtype=np.float32).reshape(-1, 4); confidence = np.asarray([d.confidence for d in found], dtype=np.float32)
             detections = sv.Detections(xyxy=xyxy, confidence=confidence, class_id=np.zeros(len(found), dtype=int))
             detections = self.tracker.update_with_detections(detections); ids = detections.tracker_id.tolist() if detections.tracker_id is not None else []
-            analytics.observe(frame_idx, ids, detections.confidence.tolist())
+            analytics.observe(frame_idx, ids, detections.confidence.tolist(), detections.xyxy.tolist(), zone_px)
             annotations = [f"#{tid} {d.label} {conf:.2f}" for tid, d, conf in zip(ids, found, detections.confidence)]
-            writer.write(labels.annotate(boxes.annotate(frame.copy(), detections), detections, annotations)); frame_idx += 1
+            annotated = labels.annotate(boxes.annotate(frame.copy(), detections), detections, annotations)
+            if zone_px:
+                x1, y1, x2, y2 = map(int, zone_px)
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                cv2.putText(annotated, "analytics zone", (x1, max(24, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, .6, (0, 255, 255), 2)
+            writer.write(annotated); frame_idx += 1
         cap.release(); writer.release()
         summary = analytics.summary() | {"query": query, "processed_frames": len(analytics.frame_counts), "fps": fps}
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2)); return summary
